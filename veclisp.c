@@ -7,11 +7,12 @@
  * license: MIT                         *
  ****************************************/
 
+#include <ctype.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
 
 #define TRACE(x)  fputs(x "\n", stderr)
 
@@ -43,7 +44,7 @@ struct veclisp_interned_syms {
 } *veclisp_interned_syms;
 typedef int (*veclisp_native_func)(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
 
-char *VECLISP_OUTPORT, *VECLISP_INPORT, *VECLISP_ERRPORT, *VECLISP_PROMPT, *VECLISP_DEFAULT_PROMPT, *VECLISP_QUOTE, *VECLISP_RESPONSE, *VECLISP_DEFAULT_RESPONSE, *VECLISP_ERR_ILLEGAL_DOTTED_LIST, *VECLISP_ERR_EXPECTED_CLOSE_PAREN, *VECLISP_ERR_CANNOT_EXEC_VEC;
+char *VECLISP_T, *VECLISP_OUTPORT, *VECLISP_INPORT, *VECLISP_ERRPORT, *VECLISP_PROMPT, *VECLISP_DEFAULT_PROMPT, *VECLISP_QUOTE, *VECLISP_UNQUOTE, *VECLISP_RESPONSE, *VECLISP_DEFAULT_RESPONSE, *VECLISP_ERR_ILLEGAL_DOTTED_LIST, *VECLISP_ERR_EXPECTED_CLOSE_PAREN, *VECLISP_ERR_CANNOT_EXEC_VEC, *VECLISP_ERR_INVALID_NAME;
 char *veclisp_intern(char *sym);
 void veclisp_print_prompt(struct veclisp_scope *scope);
 void veclisp_write_result(struct veclisp_scope *scope, struct veclisp_cell value);
@@ -55,7 +56,38 @@ int veclisp_eval(struct veclisp_scope *scope, struct veclisp_cell value, struct 
 void veclisp_write(struct veclisp_scope *scope, struct veclisp_cell value);
 void veclisp_set(struct veclisp_scope *scope, char *interned_sym, struct veclisp_cell value);
 void veclisp_fwrite(FILE *out, struct veclisp_cell value);
-#define FOREACH(var, init) for (var = init; var != NULL; var = var->next)
+int veclisp_n_quote(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_intp(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_symp(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_vecp(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_pairp(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_nilp(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_pair(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_head(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_tail(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_cmp(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_eq(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_gt(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_lt(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_gte(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_lte(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_set(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_syms(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_add(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_sub(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_mul(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_div(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_mod(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_exp(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_rsh(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_lsh(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_bitwiseand(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_bitwiseor(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_bitwisexor(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_bitwisenot(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_abs(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+#define FORNEXT(var, init) for (var = init; var != NULL; var = var->next)
+#define FORPAIR(var, init) for (var = init; var->as.pair != NULL; var = &var->as.pair[1])
 
 int main() {
   struct veclisp_scope root_scope;
@@ -82,7 +114,7 @@ char *veclisp_intern(char *sym) {
     veclisp_interned_syms->next = NULL;
     return sym;
   }
-  FOREACH(s, veclisp_interned_syms) {
+  FORNEXT(s, veclisp_interned_syms) {
     if (!strcmp(sym, s->sym)) {
       free(sym);
       return s->sym;
@@ -140,17 +172,20 @@ void veclisp_print_err(struct veclisp_scope *scope, struct veclisp_cell err) {
 }
 int veclisp_init_root_scope(struct veclisp_scope *root_scope) {
   struct veclisp_cell value;
+  VECLISP_T = veclisp_intern("t");
   VECLISP_INPORT = veclisp_intern("*In");
   VECLISP_OUTPORT = veclisp_intern("*Out");
   VECLISP_ERRPORT = veclisp_intern("*Err");
   VECLISP_PROMPT = veclisp_intern("*Prompt");
   VECLISP_DEFAULT_PROMPT = veclisp_intern("> ");
   VECLISP_QUOTE = veclisp_intern("quote");
+  VECLISP_UNQUOTE = veclisp_intern("unquote");
   VECLISP_RESPONSE = veclisp_intern("*Response");
   VECLISP_DEFAULT_RESPONSE = veclisp_intern("; ");
   VECLISP_ERR_ILLEGAL_DOTTED_LIST = veclisp_intern("illegal dotted list");
   VECLISP_ERR_EXPECTED_CLOSE_PAREN = veclisp_intern("expected closing parentheses");
   VECLISP_ERR_CANNOT_EXEC_VEC = veclisp_intern("cannot execute a vector. expected integer or pair");
+  VECLISP_ERR_INVALID_NAME = veclisp_intern("invalid name. expected a symbol");
   root_scope->bindings = NULL;
   value.type = VECLISP_INT;
   value.as.integer = (int64_t)stdout;
@@ -159,6 +194,66 @@ int veclisp_init_root_scope(struct veclisp_scope *root_scope) {
   veclisp_set(root_scope, VECLISP_INPORT, value);
   value.as.integer = (int64_t)stderr;
   veclisp_set(root_scope, VECLISP_ERRPORT, value);
+  value.as.integer = (int64_t)veclisp_n_quote;
+  veclisp_set(root_scope, VECLISP_QUOTE, value);
+  value.as.integer = (int64_t)veclisp_n_intp;
+  veclisp_set(root_scope, veclisp_intern("int?"), value);
+  value.as.integer = (int64_t)veclisp_n_symp;
+  veclisp_set(root_scope, veclisp_intern("sym?"), value);
+  value.as.integer = (int64_t)veclisp_n_vecp;
+  veclisp_set(root_scope, veclisp_intern("vec?"), value);
+  value.as.integer = (int64_t)veclisp_n_pairp;
+  veclisp_set(root_scope, veclisp_intern("pair?"), value);
+  value.as.integer = (int64_t)veclisp_n_nilp;
+  veclisp_set(root_scope, veclisp_intern("nil?"), value);
+  value.as.integer = (int64_t)veclisp_n_pair;
+  veclisp_set(root_scope, veclisp_intern("pair"), value);
+  value.as.integer = (int64_t)veclisp_n_head;
+  veclisp_set(root_scope, veclisp_intern("head"), value);
+  value.as.integer = (int64_t)veclisp_n_tail;
+  veclisp_set(root_scope, veclisp_intern("tail"), value);
+  value.as.integer = (int64_t)veclisp_n_cmp;
+  veclisp_set(root_scope, veclisp_intern("<=>"), value);
+  value.as.integer = (int64_t)veclisp_n_eq;
+  veclisp_set(root_scope, veclisp_intern("="), value);
+  value.as.integer = (int64_t)veclisp_n_gt;
+  veclisp_set(root_scope, veclisp_intern(">"), value);
+  value.as.integer = (int64_t)veclisp_n_lt;
+  veclisp_set(root_scope, veclisp_intern("<"), value);
+  value.as.integer = (int64_t)veclisp_n_lte;
+  veclisp_set(root_scope, veclisp_intern("<="), value);
+  value.as.integer = (int64_t)veclisp_n_gte;
+  veclisp_set(root_scope, veclisp_intern(">="), value);
+  value.as.integer = (int64_t)veclisp_n_set;
+  veclisp_set(root_scope, veclisp_intern("set"), value);
+  value.as.integer = (int64_t)veclisp_n_syms;
+  veclisp_set(root_scope, veclisp_intern("syms"), value);
+  value.as.integer = (int64_t)veclisp_n_add;
+  veclisp_set(root_scope, veclisp_intern("+"), value);
+  value.as.integer = (int64_t)veclisp_n_sub;
+  veclisp_set(root_scope, veclisp_intern("-"), value);
+  value.as.integer = (int64_t)veclisp_n_mul;
+  veclisp_set(root_scope, veclisp_intern("*"), value);
+  value.as.integer = (int64_t)veclisp_n_div;
+  veclisp_set(root_scope, veclisp_intern("/"), value);
+  value.as.integer = (int64_t)veclisp_n_mod;
+  veclisp_set(root_scope, veclisp_intern("%"), value);
+  value.as.integer = (int64_t)veclisp_n_exp;
+  veclisp_set(root_scope, veclisp_intern("exp"), value);
+  value.as.integer = (int64_t)veclisp_n_rsh;
+  veclisp_set(root_scope, veclisp_intern("bitwise-shift-right"), value);
+  value.as.integer = (int64_t)veclisp_n_lsh;
+  veclisp_set(root_scope, veclisp_intern("bitwise-shift-left"), value);
+  value.as.integer = (int64_t)veclisp_n_bitwiseand;
+  veclisp_set(root_scope, veclisp_intern("bitwise-and"), value);
+  value.as.integer = (int64_t)veclisp_n_bitwiseor;
+  veclisp_set(root_scope, veclisp_intern("bitwise-or"), value);
+  value.as.integer = (int64_t)veclisp_n_bitwisexor;
+  veclisp_set(root_scope, veclisp_intern("bitwise-xor"), value);
+  value.as.integer = (int64_t)veclisp_n_bitwisenot;
+  veclisp_set(root_scope, veclisp_intern("bitwise-not"), value);
+  value.as.integer = (int64_t)veclisp_n_abs;
+  veclisp_set(root_scope, veclisp_intern("abs"), value);
   value.type = VECLISP_SYM;
   value.as.sym = VECLISP_DEFAULT_PROMPT;
   veclisp_set(root_scope, VECLISP_PROMPT, value);
@@ -287,6 +382,12 @@ int veclisp_read(struct veclisp_scope *scope, struct veclisp_cell *result) {
     result->as.pair[0].type = VECLISP_SYM;
     result->as.pair[0].as.sym = VECLISP_QUOTE;
     return veclisp_read(scope, &result->as.pair[1]);
+  } else if (c == ',') {
+    result->type = VECLISP_PAIR;
+    result->as.pair = veclisp_alloc_pair();
+    result->as.pair[0].type = VECLISP_SYM;
+    result->as.pair[0].as.sym = VECLISP_UNQUOTE;
+    return veclisp_read(scope, &result->as.pair[1]);
   } else {
   read_symbol:
     result->type = VECLISP_SYM;
@@ -300,7 +401,10 @@ int veclisp_read(struct veclisp_scope *scope, struct veclisp_cell *result) {
         buf_allocated *= 2;
         sym_buf = realloc(sym_buf, sizeof(*sym_buf) * buf_allocated);
       }
-      if (isspace(c)) break;
+      if (isspace(c) || c == ')' || c == ']' || c == '[' || c == '(') {
+        ungetc(c, (FILE *)inport.as.integer);
+        break;
+      }
       sym_buf[buf_used++] = c;
     }
     sym_buf[buf_used++] = 0;
@@ -349,6 +453,8 @@ int veclisp_eval(struct veclisp_scope *scope, struct veclisp_cell value, struct 
       // (Arg macro-body ...)     <- binds the tail of argument list to a single name
       // ([A B C] macro-body ...) <- binds the unevaluated arguments to names
       // TODO
+      result->type = VECLISP_SYM;
+      result->as.sym = veclisp_intern(strdup("lambdas are not implemented yet"));
       return 1;
     }
     return 0;
@@ -359,8 +465,8 @@ int veclisp_eval(struct veclisp_scope *scope, struct veclisp_cell value, struct 
 int veclisp_scope_lookup(struct veclisp_scope *scope, char *sym, struct veclisp_cell *result) {
   struct veclisp_scope *s;
   struct veclisp_bindings *b;
-  FOREACH(s, scope) {
-    FOREACH(b, s->bindings) {
+  FORNEXT(s, scope) {
+    FORNEXT(b, s->bindings) {
       if (b->sym == sym) {
         *result = b->value;
         return 0;
@@ -374,9 +480,9 @@ int veclisp_scope_lookup(struct veclisp_scope *scope, char *sym, struct veclisp_
 void veclisp_set(struct veclisp_scope *scope, char *interned_sym, struct veclisp_cell value) {
   struct veclisp_scope *s;
   struct veclisp_bindings *b;
-  FOREACH(s, scope) {
+  FORNEXT(s, scope) {
     if (s->bindings) {
-      FOREACH(b, s->bindings) {
+      FORNEXT(b, s->bindings) {
         if (b->sym == interned_sym) {
           b->value = value;
           return;
@@ -466,4 +572,351 @@ void veclisp_fwrite(FILE *out, struct veclisp_cell value) {
     }
     break;
   }
+}
+int veclisp_n_quote(struct veclisp_scope *scope, struct veclisp_cell value, struct veclisp_cell *result) {
+  *result = value;
+  return 0;
+}
+int veclisp_n_intp(struct veclisp_scope *scope, struct veclisp_cell value, struct veclisp_cell *result) {
+  if (veclisp_eval(scope, value.as.pair[0], &value)) return 1;
+  if (value.type == VECLISP_INT) {
+    *result = value;
+  } else {
+    result->type = VECLISP_PAIR;
+    result->as.pair = NULL;
+  }
+  return 0;
+}
+int veclisp_n_symp(struct veclisp_scope *scope, struct veclisp_cell value, struct veclisp_cell *result) {
+  if (veclisp_eval(scope, value.as.pair[0], &value)) return 1;
+  if (value.type == VECLISP_SYM) {
+    *result = value;
+  } else {
+    result->type = VECLISP_PAIR;
+    result->as.pair = NULL;
+  }
+  return 0;
+}
+int veclisp_n_pairp(struct veclisp_scope *scope, struct veclisp_cell value, struct veclisp_cell *result) {
+  if (veclisp_eval(scope, value.as.pair[0], &value)) return 1;
+  if (value.type == VECLISP_PAIR) {
+    *result = value;
+  } else {
+    result->type = VECLISP_PAIR;
+    result->as.pair = NULL;
+  }
+  return 0;
+}
+int veclisp_n_vecp(struct veclisp_scope *scope, struct veclisp_cell value, struct veclisp_cell *result) {
+  if (veclisp_eval(scope, value.as.pair[0], &value)) return 1;
+  if (value.type == VECLISP_VEC) {
+    *result = value;
+  } else {
+    result->type = VECLISP_PAIR;
+    result->as.pair = NULL;
+  }
+  return 0;
+}
+int veclisp_n_nilp(struct veclisp_scope *scope, struct veclisp_cell value, struct veclisp_cell *result) {
+  if (veclisp_eval(scope, value.as.pair[0], &value)) return 1;
+  if (value.type == VECLISP_PAIR && value.as.pair == NULL) {
+    result->type = VECLISP_SYM;
+    result->as.sym = VECLISP_T;
+  } else {
+    result->type = VECLISP_PAIR;
+    result->as.pair = NULL;
+  }
+  return 0;
+}
+int veclisp_n_pair(struct veclisp_scope *scope, struct veclisp_cell value, struct veclisp_cell *result) {
+  result->type = VECLISP_PAIR;
+  result->as.pair = veclisp_alloc_pair();
+  return veclisp_eval(scope, value.as.pair[0], &result->as.pair[0])
+    || veclisp_eval(scope, value.as.pair[1].as.pair[0], &result->as.pair[1]);
+}
+int veclisp_n_head(struct veclisp_scope *scope, struct veclisp_cell value, struct veclisp_cell *result) {
+  if (veclisp_eval(scope, value.as.pair[0], &value)) return 1;
+  if (value.type != VECLISP_PAIR || value.as.pair == NULL) {
+    result->type = VECLISP_PAIR;
+    result->as.pair = NULL;
+  } else {
+    *result = value.as.pair[0];
+  }
+  return 0;
+}
+int veclisp_n_tail(struct veclisp_scope *scope, struct veclisp_cell value, struct veclisp_cell *result) {
+  if (veclisp_eval(scope, value.as.pair[0], &value)) return 1;
+  if (value.type != VECLISP_PAIR || value.as.pair == NULL) {
+    result->type = VECLISP_PAIR;
+    result->as.pair = NULL;
+  } else {
+    *result = value.as.pair[1];
+  }
+  return 0;
+}
+int veclisp_compare(struct veclisp_cell x, struct veclisp_cell y) {
+  int i, r;
+  if (x.type == y.type) {
+    switch (y.type) {
+    case VECLISP_INT:
+      if (x.as.integer > y.as.integer) return 1;
+      else if (x.as.integer < y.as.integer) return -1;
+      else return 0;
+    case VECLISP_SYM:
+      if (x.as.sym == y.as.sym) return 0;
+      else return strcmp(x.as.sym, y.as.sym);
+    case VECLISP_VEC:
+      if (x.as.vec == y.as.vec) return 0;
+      if (x.as.vec[0].as.integer > y.as.vec[0].as.integer) return 1;
+      if (x.as.vec[0].as.integer < y.as.vec[0].as.integer) return 1;
+      for (i = 1; i <= x.as.vec[0].as.integer; ++i) {
+        r = veclisp_compare(x.as.vec[i], y.as.vec[i]);
+        if (r != 0) return r;
+      }
+      return 0;
+    case VECLISP_PAIR:
+      if (x.as.pair == y.as.pair) return 0;
+      r = veclisp_compare(x.as.pair[0], y.as.pair[0]);
+      if (r != 0) return r;
+      return veclisp_compare(x.as.pair[1], y.as.pair[1]);
+    default: return 0;
+    }
+  } else if (x.type == VECLISP_PAIR && x.as.pair == NULL) return -1;
+  else if (y.type == VECLISP_PAIR && y.as.pair == NULL) return 1;
+  else if (x.type > y.type) return 1;
+  else return -1;
+}
+int veclisp_n_cmp(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
+  struct veclisp_cell *a, x, y;
+  result->type = VECLISP_INT;
+  if (veclisp_eval(scope, args.as.pair[0], &x)) return 1;
+  FORPAIR(a, &args.as.pair[1]) {
+    if (veclisp_eval(scope, a->as.pair[0], &y)) return 1;
+    result->as.integer = veclisp_compare(x, y);
+    if (result->as.integer != 0) break;
+    x = y;
+  }
+  return 0;
+}
+int veclisp_n_eq(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
+  if (veclisp_n_cmp(scope, args, result)) return 1;
+  if (result->as.integer == 0) {
+    result->type = VECLISP_SYM;
+    result->as.sym = VECLISP_T;
+  } else {
+    result->type = VECLISP_PAIR;
+    result->as.pair = NULL;
+  }
+  return 0;
+}
+int veclisp_n_gt(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
+  if (veclisp_n_cmp(scope, args, result)) return 1;
+  if (result->as.integer > 0) {
+    result->type = VECLISP_SYM;
+    result->as.sym = VECLISP_T;
+  } else {
+    result->type = VECLISP_PAIR;
+    result->as.pair = NULL;
+  }
+  return 0;
+}
+int veclisp_n_lt(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
+  if (veclisp_n_cmp(scope, args, result)) return 1;
+  if (result->as.integer < 0) {
+    result->type = VECLISP_SYM;
+    result->as.sym = VECLISP_T;
+  } else {
+    result->type = VECLISP_PAIR;
+    result->as.pair = NULL;
+  }
+  return 0;
+}
+int veclisp_n_gte(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
+  if (veclisp_n_cmp(scope, args, result)) return 1;
+  if (result->as.integer >= 0) {
+    result->type = VECLISP_SYM;
+    result->as.sym = VECLISP_T;
+  } else {
+    result->type = VECLISP_PAIR;
+    result->as.pair = NULL;
+  }
+  return 0;
+}
+int veclisp_n_lte(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
+  if (veclisp_n_cmp(scope, args, result)) return 1;
+  if (result->as.integer <= 0) {
+    result->type = VECLISP_SYM;
+    result->as.sym = VECLISP_T;
+  } else {
+    result->type = VECLISP_PAIR;
+    result->as.pair = NULL;
+  }
+  return 0;
+}
+int veclisp_n_set(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
+  struct veclisp_cell name;
+  if (veclisp_eval(scope, args.as.pair[0], &name)) return 1;
+  if (name.type != VECLISP_SYM) {
+    result->type = VECLISP_SYM;
+    result->as.sym = VECLISP_ERR_INVALID_NAME;
+    return 1;
+  }
+  if (veclisp_eval(scope, args.as.pair[1].as.pair[0], result)) return 1;
+  veclisp_set(scope, name.as.sym, *result);
+  return 0;
+}
+int veclisp_n_syms(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
+  struct veclisp_scope *s;
+  struct veclisp_bindings *b;
+  struct veclisp_cell *r;
+  result->type = VECLISP_PAIR;
+  result->as.pair = veclisp_alloc_pair();
+  r = result;
+  FORNEXT(s, scope) {
+    if (s->bindings) {
+      FORNEXT(b, s->bindings) {
+        r->as.pair[0].type = VECLISP_SYM;
+        r->as.pair[0].as.sym = b->sym;
+        r->as.pair[1].type = VECLISP_PAIR;
+        if (b->next == NULL && s->next == NULL) {
+          r->as.pair[1].as.pair = NULL;
+          return 0;
+        } else {
+          r->as.pair[1].as.pair = veclisp_alloc_pair();
+          r = &r->as.pair[1];
+        }
+      }
+    }
+  }
+  return 0;
+}
+int veclisp_n_add(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
+  struct veclisp_cell *a, x;
+  result->type = VECLISP_INT;
+  result->as.integer = 0;
+  FORPAIR(a, &args) {
+    if (veclisp_eval(scope, a->as.pair[0], &x)) return 1;
+    result->as.integer += x.as.integer;
+  }
+  return 0;
+}
+int veclisp_n_sub(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
+  struct veclisp_cell *a, x;
+  result->type = VECLISP_INT;
+  result->as.integer = 0;
+  FORPAIR(a, &args) {
+    if (veclisp_eval(scope, a->as.pair[0], &x)) return 1;
+    result->as.integer -= x.as.integer;
+  }
+  return 0;
+}
+int veclisp_n_mul(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
+  struct veclisp_cell *a, x;
+  result->type = VECLISP_INT;
+  result->as.integer = 1;
+  FORPAIR(a, &args) {
+    if (veclisp_eval(scope, a->as.pair[0], &x)) return 1;
+    result->as.integer *= x.as.integer;
+  }
+  return 0;
+}
+int veclisp_n_div(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
+  struct veclisp_cell *a, x;
+  result->type = VECLISP_INT;
+  result->as.integer = 0;
+  FORPAIR(a, &args) {
+    if (veclisp_eval(scope, a->as.pair[0], &x)) return 1;
+    if (a == &args) result->as.integer = x.as.integer;
+    else result->as.integer /= x.as.integer;
+  }
+  return 0;
+}
+int veclisp_n_mod(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
+  struct veclisp_cell *a, x;
+  result->type = VECLISP_INT;
+  result->as.integer = 0;
+  FORPAIR(a, &args) {
+    if (veclisp_eval(scope, a->as.pair[0], &x)) return 1;
+    if (a == &args) result->as.integer = x.as.integer;
+    else result->as.integer %= x.as.integer;
+  }
+  return 0;
+}
+int veclisp_n_exp(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
+  struct veclisp_cell *a, x;
+  result->type = VECLISP_INT;
+  result->as.integer = 0;
+  FORPAIR(a, &args) {
+    if (veclisp_eval(scope, a->as.pair[0], &x)) return 1;
+    if (a == &args) result->as.integer = x.as.integer;
+    else result->as.integer = (int64_t)powl(result->as.integer, x.as.integer);
+  }
+  return 0;
+}
+int veclisp_n_rsh(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
+  struct veclisp_cell *a, x;
+  result->type = VECLISP_INT;
+  result->as.integer = 0;
+  FORPAIR(a, &args) {
+    if (veclisp_eval(scope, a->as.pair[0], &x)) return 1;
+    if (a == &args) result->as.integer = x.as.integer;
+    else result->as.integer >>= x.as.integer;
+  }
+  return 0;
+}
+int veclisp_n_lsh(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
+  struct veclisp_cell *a, x;
+  result->type = VECLISP_INT;
+  result->as.integer = 0;
+  FORPAIR(a, &args) {
+    if (veclisp_eval(scope, a->as.pair[0], &x)) return 1;
+    if (a == &args) result->as.integer = x.as.integer;
+    else result->as.integer <<= x.as.integer;
+  }
+  return 0;
+}
+int veclisp_n_bitwiseand(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
+  struct veclisp_cell *a, x;
+  result->type = VECLISP_INT;
+  result->as.integer = 0;
+  FORPAIR(a, &args) {
+    if (veclisp_eval(scope, a->as.pair[0], &x)) return 1;
+    if (a == &args) result->as.integer = x.as.integer;
+    else result->as.integer &= x.as.integer;
+  }
+  return 0;
+}
+int veclisp_n_bitwiseor(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
+  struct veclisp_cell *a, x;
+  result->type = VECLISP_INT;
+  result->as.integer = 0;
+  FORPAIR(a, &args) {
+    if (veclisp_eval(scope, a->as.pair[0], &x)) return 1;
+    if (a == &args) result->as.integer = x.as.integer;
+    else result->as.integer |= x.as.integer;
+  }
+  return 0;
+}
+int veclisp_n_bitwisexor(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
+  struct veclisp_cell *a, x;
+  result->type = VECLISP_INT;
+  result->as.integer = 0;
+  FORPAIR(a, &args) {
+    if (veclisp_eval(scope, a->as.pair[0], &x)) return 1;
+    if (a == &args) result->as.integer = x.as.integer;
+    else result->as.integer ^= x.as.integer;
+  }
+  return 0;
+}
+int veclisp_n_bitwisenot(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
+  if (veclisp_eval(scope, args.as.pair[0], result)) return 1;
+  result->type = VECLISP_INT;
+  result->as.integer = ~result->as.integer;
+  return 0;
+}
+int veclisp_n_abs(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
+  if (veclisp_eval(scope, args.as.pair[0], result)) return 1;
+  result->type = VECLISP_INT;
+  result->as.integer = abs(result->as.integer);
+  return 0;
 }
