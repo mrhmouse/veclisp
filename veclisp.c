@@ -1140,20 +1140,27 @@ int veclisp_n_call(struct veclisp_scope *scope, struct veclisp_cell args, struct
   struct veclisp_cell lambda_head, lambda_tail, *t, *a;
   if (veclisp_eval(scope, args.as.pair[0], &lambda_head)) return 1;
   lambda_tail = args.as.pair[1];
-  if (lambda_head.type == VECLISP_PAIR && lambda_head.as.pair[0].type == VECLISP_PAIR) {
-    if (lambda_tail.type == VECLISP_PAIR) {
-      if (lambda_tail.as.pair != NULL) {
-        lambda_tail.as.pair = veclisp_alloc_pair();
-        t = &lambda_tail;
-        FORPAIR(a, &args.as.pair[1]) {
-          if (veclisp_eval(scope, a->as.pair[0], &t->as.pair[0])) return 1;
-          t->as.pair[1].type = VECLISP_PAIR;
-          if (a->as.pair[1].type != VECLISP_PAIR) {
-            if (veclisp_eval(scope, a->as.pair[1], &t->as.pair[1])) return 1;
-          } else if (a->as.pair[1].as.pair != NULL) {
-            t = &t->as.pair[1];
-          } else {
-            t->as.pair[1].as.pair = NULL;
+  if (lambda_head.type == VECLISP_PAIR) {
+    if (lambda_head.as.pair == NULL) {
+      result->type = VECLISP_SYM;
+      result->as.sym = VECLISP_ERR_ILLEGAL_LAMBDA_LIST;
+      return 1;
+    }
+    if (lambda_head.as.pair[0].type == VECLISP_PAIR) {
+      if (lambda_tail.type == VECLISP_PAIR) {
+        if (lambda_tail.as.pair != NULL) {
+          lambda_tail.as.pair = veclisp_alloc_pair();
+          t = &lambda_tail;
+          FORPAIR(a, &args.as.pair[1]) {
+            if (veclisp_eval(scope, a->as.pair[0], &t->as.pair[0])) return 1;
+            t->as.pair[1].type = VECLISP_PAIR;
+            if (a->as.pair[1].type != VECLISP_PAIR) {
+              if (veclisp_eval(scope, a->as.pair[1], &t->as.pair[1])) return 1;
+            } else if (a->as.pair[1].as.pair != NULL) {
+              t = &t->as.pair[1];
+            } else {
+              t->as.pair[1].as.pair = NULL;
+            }
           }
         }
       }
@@ -1177,7 +1184,12 @@ int veclisp_lambda(struct veclisp_scope *parent_scope, struct veclisp_cell lambd
     goto retry;
   case VECLISP_INT:
     return ((veclisp_native_func)lambda.as.integer)(parent_scope, args, result);
-  default: break;
+  case VECLISP_PAIR:
+    if (lambda.as.pair == NULL) {
+      result->type = VECLISP_SYM;
+      result->as.sym = VECLISP_ERR_ILLEGAL_LAMBDA_LIST;
+      return 1;
+    }
   }
   scope.bindings = NULL;
   switch (lambda.as.pair[0].type) {
