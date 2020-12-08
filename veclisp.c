@@ -120,6 +120,10 @@ int veclisp_n_exit(struct veclisp_scope *, struct veclisp_cell, struct veclisp_c
 int veclisp_n_write(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
 int veclisp_n_pack(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
 int veclisp_n_fold(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_no(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_yes(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_unfoldpair(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_unfoldvec(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
 #define FORNEXT(var, init) for (var = init; var != NULL; var = var->next)
 #define FORPAIR(var, init) for (var = init; var->type == VECLISP_PAIR && var->as.pair != NULL; var = &var->as.pair[1])
 #define FORVEC(i, vec) for (i = 1; i <= vec[0].as.integer; ++i)
@@ -358,6 +362,14 @@ int veclisp_init_root_scope(struct veclisp_scope *root_scope) {
   veclisp_set(root_scope, veclisp_intern("pack"), value);
   value.as.integer = (int64_t)veclisp_n_fold;
   veclisp_set(root_scope, veclisp_intern("fold"), value);
+  value.as.integer = (int64_t)veclisp_n_unfoldpair;
+  veclisp_set(root_scope, veclisp_intern("unfold-pair"), value);
+  value.as.integer = (int64_t)veclisp_n_unfoldvec;
+  veclisp_set(root_scope, veclisp_intern("unfold-vec"), value);
+  value.as.integer = (int64_t)veclisp_n_yes;
+  veclisp_set(root_scope, veclisp_intern("yes"), value);
+  value.as.integer = (int64_t)veclisp_n_no;
+  veclisp_set(root_scope, veclisp_intern("no"), value);
   value.type = VECLISP_SYM;
   value.as.sym = VECLISP_DEFAULT_PROMPT;
   veclisp_set(root_scope, VECLISP_PROMPT, value);
@@ -1746,9 +1758,108 @@ int veclisp_n_fold(struct veclisp_scope *scope, struct veclisp_cell args, struct
   }
   return 1;
 }
-/*
-  int veclisp_n_unfold(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
+int veclisp_n_no(struct veclisp_scope *scope,  struct veclisp_cell args, struct veclisp_cell *result) {
+  result->type = VECLISP_PAIR;
+  result->as.pair = NULL;
+  return 0;
+}
+int veclisp_n_yes(struct veclisp_scope *scope,  struct veclisp_cell args, struct veclisp_cell *result) {
+  result->type = VECLISP_SYM;
+  result->as.sym = VECLISP_T;
+  return 0;
+}
+int veclisp_n_unfoldpair(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
+  struct veclisp_cell p, f, g, seed, tailgen, *r, s;
+  if (veclisp_eval(scope, args.as.pair[0], &p)
+      || veclisp_eval(scope, args.as.pair[1].as.pair[0], &f)
+      || veclisp_eval(scope, args.as.pair[1].as.pair[1].as.pair[0], &g)
+      || veclisp_eval(scope, args.as.pair[1].as.pair[1].as.pair[1].as.pair[0], &seed)) {
+    return 1;
+  } else if (args.as.pair[1].as.pair[1].as.pair[1].as.pair[1].as.pair == NULL) {
+    tailgen.type = VECLISP_INT;
+    tailgen.as.integer = (int64_t)veclisp_n_no;
+  } else if (veclisp_eval(scope, args.as.pair[1].as.pair[1].as.pair[1].as.pair[1].as.pair[0], &tailgen)) {
+    return 1;
   }
+  r = result;
+  for (;;) {
+    args.type = VECLISP_PAIR;
+    args.as.pair = veclisp_alloc_pair();
+    args.as.pair[0] = seed;
+    args.as.pair[1].type = VECLISP_PAIR;
+    args.as.pair[1].as.pair = NULL;
+    if (veclisp_lambda(scope, p, args, &s)) return 1;
+    if (!(s.type == VECLISP_PAIR && s.as.pair == NULL)) {
+      args.type = VECLISP_PAIR;
+      args.as.pair = veclisp_alloc_pair();
+      args.as.pair[0] = seed;
+      args.as.pair[1].type = VECLISP_PAIR;
+      args.as.pair[1].as.pair = NULL;
+      return veclisp_lambda(scope, tailgen, args, r);
+    }
+    r->type = VECLISP_PAIR;
+    r->as.pair = veclisp_alloc_pair();
+    args.type = VECLISP_PAIR;
+    args.as.pair = veclisp_alloc_pair();
+    args.as.pair[0] = seed;
+    args.as.pair[1].type = VECLISP_PAIR;
+    args.as.pair[1].as.pair = NULL;
+    if (veclisp_lambda(scope, f, args, &r->as.pair[0])) return 1;
+    r = &r->as.pair[1];
+    args.type = VECLISP_PAIR;
+    args.as.pair = veclisp_alloc_pair();
+    args.as.pair[0] = seed;
+    args.as.pair[1].type = VECLISP_PAIR;
+    args.as.pair[1].as.pair = NULL;
+    if (veclisp_lambda(scope, g, args, &seed)) return 1;
+  }
+  return 1;
+}
+int veclisp_n_unfoldvec(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
+  int64_t used = 1, allocated = 32;
+  struct veclisp_cell p, f, g, seed, s;
+  if (veclisp_eval(scope, args.as.pair[0], &p)
+      || veclisp_eval(scope, args.as.pair[1].as.pair[0], &f)
+      || veclisp_eval(scope, args.as.pair[1].as.pair[1].as.pair[0], &g)
+      || veclisp_eval(scope, args.as.pair[1].as.pair[1].as.pair[1].as.pair[0], &seed)) {
+    return 1;
+  }
+  result->type = VECLISP_VEC;
+  result->as.vec = malloc(sizeof(*result->as.vec) * allocated);
+  result->as.vec[0].type = VECLISP_INT;
+  result->as.vec[0].as.integer = 0;
+  for (;;) {
+    if (used >= allocated) {
+      allocated *= 2;
+      result->as.vec = realloc(result->as.vec, sizeof(*result->as.vec) * allocated);
+    }
+    args.type = VECLISP_PAIR;
+    args.as.pair = veclisp_alloc_pair();
+    args.as.pair[0] = seed;
+    args.as.pair[1].type = VECLISP_PAIR;
+    args.as.pair[1].as.pair = NULL;
+    if (veclisp_lambda(scope, p, args, &s)) return 1;
+    if (!(s.type == VECLISP_PAIR && s.as.pair == NULL)) {
+      result->as.vec[0].as.integer = used - 1;
+      result->as.vec = realloc(result->as.vec, sizeof(*result->as.vec) * used);
+      return 0;
+    }
+    args.type = VECLISP_PAIR;
+    args.as.pair = veclisp_alloc_pair();
+    args.as.pair[0] = seed;
+    args.as.pair[1].type = VECLISP_PAIR;
+    args.as.pair[1].as.pair = NULL;
+    if (veclisp_lambda(scope, f, args, &result->as.vec[used++])) return 1;
+    args.type = VECLISP_PAIR;
+    args.as.pair = veclisp_alloc_pair();
+    args.as.pair[0] = seed;
+    args.as.pair[1].type = VECLISP_PAIR;
+    args.as.pair[1].as.pair = NULL;
+    if (veclisp_lambda(scope, g, args, &seed)) return 1;
+  }
+  return 1;
+}  
+/*
   int veclisp_n_find(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
   }
   int veclisp_n_bytes(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
