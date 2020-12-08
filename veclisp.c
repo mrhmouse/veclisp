@@ -110,6 +110,10 @@ int veclisp_n_open(struct veclisp_scope *, struct veclisp_cell, struct veclisp_c
 int veclisp_n_close(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
 int veclisp_n_map(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
 int veclisp_n_filter(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_let(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_read(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_throw(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_catch(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
 #define FORNEXT(var, init) for (var = init; var != NULL; var = var->next)
 #define FORPAIR(var, init) for (var = init; var->type == VECLISP_PAIR && var->as.pair != NULL; var = &var->as.pair[1])
 #define FORVEC(i, vec) for (i = 1; i <= vec[0].as.integer; ++i)
@@ -328,6 +332,14 @@ int veclisp_init_root_scope(struct veclisp_scope *root_scope) {
   veclisp_set(root_scope, veclisp_intern("map"), value);
   value.as.integer = (int64_t)veclisp_n_filter;
   veclisp_set(root_scope, veclisp_intern("filter"), value);
+  value.as.integer = (int64_t)veclisp_n_let;
+  veclisp_set(root_scope, veclisp_intern("let"), value);
+  value.as.integer = (int64_t)veclisp_n_read;
+  veclisp_set(root_scope, veclisp_intern("read"), value);
+  value.as.integer = (int64_t)veclisp_n_catch;
+  veclisp_set(root_scope, veclisp_intern("catch"), value);
+  value.as.integer = (int64_t)veclisp_n_throw;
+  veclisp_set(root_scope, veclisp_intern("throw"), value);
   value.type = VECLISP_SYM;
   value.as.sym = VECLISP_DEFAULT_PROMPT;
   veclisp_set(root_scope, VECLISP_PROMPT, value);
@@ -1488,6 +1500,59 @@ int veclisp_n_filter(struct veclisp_scope *scope, struct veclisp_cell args, stru
     return 1;
   }
 }
+int veclisp_n_let(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
+  struct veclisp_cell *a;
+  struct veclisp_scope let_scope;
+  struct veclisp_bindings let_bindings, *b;
+  b = let_scope.bindings = &let_bindings;
+  let_bindings.sym = NULL;
+  let_bindings.next = NULL;
+  FORPAIR(a, &args.as.pair[0]) {
+    if (b->sym != NULL) {
+      b->next = malloc(sizeof(*b->next));
+      b = b->next;
+    }
+    b->sym = a->as.pair[0].as.sym;
+    if (veclisp_eval(scope, a->as.pair[1].as.pair[0], &b->value)) return 1;
+    b->next = NULL;
+    a = &a->as.pair[1];
+  }
+  let_scope.next = scope;
+  FORPAIR(a, &args.as.pair[1]) if (veclisp_eval(&let_scope, a->as.pair[0], result)) return 1;
+  return 0;
+}
+int veclisp_n_read(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
+  if (veclisp_read(scope, result)) {
+    if (result->type == VECLISP_INT && result->as.integer == EOF) return 0;
+    return 1;
+  }
+  return 0;
+}
+int veclisp_n_throw(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
+  veclisp_eval(scope, args.as.pair[0], result);
+  return 1;
+}
+int veclisp_n_catch(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
+  struct veclisp_cell *a;
+  struct veclisp_scope catch_scope;
+  struct veclisp_bindings catch_bindings;
+  catch_bindings.sym = args.as.pair[0].as.pair[0].as.sym;
+  catch_bindings.value.type = VECLISP_PAIR;
+  catch_bindings.value.as.pair = NULL;
+  catch_bindings.next = NULL;
+  catch_scope.bindings = &catch_bindings;
+  catch_scope.next = scope;
+  FORPAIR(a, &args.as.pair[1]) {
+    if (veclisp_eval(scope, a->as.pair[0], result)) {
+      catch_bindings.value = *result;
+      FORPAIR(a, &args.as.pair[0].as.pair[1]) {
+        if (veclisp_eval(&catch_scope, a->as.pair[0], result)) return 1;
+      }
+      return 0;
+    }
+  }
+  return 0;
+}
 /*
   int veclisp_n_fold(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
   }
@@ -1499,12 +1564,6 @@ int veclisp_n_filter(struct veclisp_scope *scope, struct veclisp_cell args, stru
   }
   int veclisp_n_write(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
   }
-  int veclisp_n_let(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
-  }
-  int veclisp_n_throw(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
-  }
-  int veclisp_n_catch(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
-  }
   int veclisp_n_bytes(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
   }
   int veclisp_n_pack(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
@@ -1514,7 +1573,5 @@ int veclisp_n_filter(struct veclisp_scope *scope, struct veclisp_cell args, stru
   int veclisp_n_readbytes(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
   }
   int veclisp_n_readline(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
-  }
-  int veclisp_n_read(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
   }
 */
