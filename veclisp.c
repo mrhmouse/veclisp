@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <gc.h>
 
 #define TRACE(x)  fputs(x "\n", stderr)
 
@@ -384,7 +385,7 @@ int skip_space(FILE *in) {
   return c;
 }
 struct veclisp_cell *veclisp_alloc_pair() {
-  return malloc(sizeof(struct veclisp_cell) * 2);
+  return GC_malloc(sizeof(struct veclisp_cell) * 2);
 }
 int veclisp_read(struct veclisp_scope *scope, struct veclisp_cell *result) {
   int c, sign = 1, buf_allocated, buf_used;
@@ -435,16 +436,16 @@ int veclisp_read(struct veclisp_scope *scope, struct veclisp_cell *result) {
     buf_used = 1;
     buf_allocated = 16;
     result->type = VECLISP_VEC;
-    result->as.vec = malloc(sizeof(*result->as.vec) * buf_allocated);
+    result->as.vec = GC_malloc(sizeof(*result->as.vec) * buf_allocated);
     result->as.vec[0].type = VECLISP_INT;
     do {
       if (buf_used >= buf_allocated) {
         buf_allocated *= 2;
-        result->as.vec = realloc(result->as.vec, sizeof(*result->as.vec) * buf_allocated);
+        result->as.vec = GC_realloc(result->as.vec, sizeof(*result->as.vec) * buf_allocated);
       }
       c = skip_space((FILE *)inport.as.integer);
       if (c == ']') {
-        result->as.vec = realloc(result->as.vec, sizeof(*result->as.vec) * buf_used);
+        result->as.vec = GC_realloc(result->as.vec, sizeof(*result->as.vec) * buf_used);
         result->as.vec[0].as.integer = buf_used - 1;
         return 0;
       }
@@ -541,7 +542,7 @@ int veclisp_eval(struct veclisp_scope *scope, struct veclisp_cell value, struct 
     return 0;
   case VECLISP_VEC:
     result->type = VECLISP_VEC;
-    result->as.vec = malloc(sizeof(struct veclisp_cell) * (value.as.vec[0].as.integer + 1));
+    result->as.vec = GC_malloc(sizeof(struct veclisp_cell) * (value.as.vec[0].as.integer + 1));
     result->as.vec[0] = value.as.vec[0];
     for (i = 1; i <= value.as.vec[0].as.integer; ++i)
       if (veclisp_eval(scope, value.as.vec[i], &result->as.vec[i])) return 1;
@@ -584,7 +585,7 @@ void veclisp_set(struct veclisp_scope *scope, char *interned_sym, struct veclisp
       }
     }
     if (!s->next) {
-      b = malloc(sizeof(*b));
+      b = GC_malloc(sizeof(*b));
       b->next = s->bindings;
       b->sym = interned_sym;
       b->value = value;
@@ -1283,7 +1284,7 @@ int veclisp_lambda(struct veclisp_scope *parent_scope, struct veclisp_cell lambd
       if (p->as.pair[1].as.pair == NULL) {
         b->next = NULL;
       } else {
-        b->next = malloc(sizeof(*b->next));
+        b->next = GC_malloc(sizeof(*b->next));
         b = b->next;
       }
     }
@@ -1311,7 +1312,7 @@ int veclisp_lambda(struct veclisp_scope *parent_scope, struct veclisp_cell lambd
       if (i == lambda.as.pair[0].as.vec[0].as.integer) {
         b->next = NULL;
       } else {
-        b->next = malloc(sizeof(*b->next));
+        b->next = GC_malloc(sizeof(*b->next));
         b = b->next;
       }
     }
@@ -1413,7 +1414,7 @@ int veclisp_n_map(struct veclisp_scope *scope, struct veclisp_cell args, struct 
   switch (seq.type) {
   case VECLISP_VEC:
     result->type = VECLISP_VEC;
-    result->as.vec = malloc(sizeof(*result->as.vec) * (1 + seq.as.vec[0].as.integer));
+    result->as.vec = GC_malloc(sizeof(*result->as.vec) * (1 + seq.as.vec[0].as.integer));
     result->as.vec[0] = seq.as.vec[0];
     FORVEC(i, seq.as.vec) {
       fun_args.type = VECLISP_PAIR;
@@ -1472,7 +1473,7 @@ int veclisp_n_filter(struct veclisp_scope *scope, struct veclisp_cell args, stru
     vec_allocated = 1 + seq.as.vec[0].as.integer;
     vec_used = 0;
     result->type = VECLISP_VEC;
-    result->as.vec = malloc(sizeof(*result->as.vec) * vec_allocated);
+    result->as.vec = GC_malloc(sizeof(*result->as.vec) * vec_allocated);
     result->as.vec[vec_used++] = seq.as.vec[0];
     FORVEC(i, seq.as.vec) {
       fun_args.type = VECLISP_PAIR;
@@ -1486,7 +1487,7 @@ int veclisp_n_filter(struct veclisp_scope *scope, struct veclisp_cell args, stru
       }
     }
     result->as.vec[0].as.integer = vec_used - 1;
-    result->as.vec = realloc(result->as.vec, sizeof(*result->as.vec) * vec_used);
+    result->as.vec = GC_realloc(result->as.vec, sizeof(*result->as.vec) * vec_used);
     return 0;
   case VECLISP_PAIR:
     result->type = VECLISP_PAIR;
@@ -1539,7 +1540,7 @@ int veclisp_n_let(struct veclisp_scope *scope, struct veclisp_cell args, struct 
   let_bindings.next = NULL;
   FORPAIR(a, &args.as.pair[0]) {
     if (b->sym != NULL) {
-      b->next = malloc(sizeof(*b->next));
+      b->next = GC_malloc(sizeof(*b->next));
       b = b->next;
     }
     b->sym = a->as.pair[0].as.sym;
@@ -1675,7 +1676,7 @@ char *veclisp_pack(struct veclisp_cell value, int64_t *used, int64_t *allocated,
     for (i = 0; value.as.sym[i] != 0; ++i) {
       if (*used >= *allocated) {
         *allocated *= 2;
-        sym = realloc(sym, sizeof(*sym) * (*allocated));
+        sym = GC_realloc(sym, sizeof(*sym) * (*allocated));
       }
       sym[(*used)++] = value.as.sym[i];
     }
@@ -1683,7 +1684,7 @@ char *veclisp_pack(struct veclisp_cell value, int64_t *used, int64_t *allocated,
   case VECLISP_INT:
     if (*used >= *allocated) {
       *allocated *= 2;
-      sym = realloc(sym, sizeof(*sym) * (*allocated));
+      sym = GC_realloc(sym, sizeof(*sym) * (*allocated));
     }
     sym[(*used)++] = value.as.integer;
     return sym;
@@ -1701,7 +1702,7 @@ char *veclisp_pack(struct veclisp_cell value, int64_t *used, int64_t *allocated,
 int veclisp_n_pack(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
   struct veclisp_cell value, *a;
   int64_t used = 0, allocated = 32;
-  char *sym = malloc(sizeof(*sym) * allocated);
+  char *sym = GC_malloc(sizeof(*sym) * allocated);
   FORPAIR(a, &args) {
     if (veclisp_eval(scope, args.as.pair[0], &value)) return 1;
     sym = veclisp_pack(value, &used, &allocated, sym);
@@ -1825,13 +1826,13 @@ int veclisp_n_unfoldvec(struct veclisp_scope *scope, struct veclisp_cell args, s
     return 1;
   }
   result->type = VECLISP_VEC;
-  result->as.vec = malloc(sizeof(*result->as.vec) * allocated);
+  result->as.vec = GC_malloc(sizeof(*result->as.vec) * allocated);
   result->as.vec[0].type = VECLISP_INT;
   result->as.vec[0].as.integer = 0;
   for (;;) {
     if (used >= allocated) {
       allocated *= 2;
-      result->as.vec = realloc(result->as.vec, sizeof(*result->as.vec) * allocated);
+      result->as.vec = GC_realloc(result->as.vec, sizeof(*result->as.vec) * allocated);
     }
     args.type = VECLISP_PAIR;
     args.as.pair = veclisp_alloc_pair();
@@ -1841,7 +1842,7 @@ int veclisp_n_unfoldvec(struct veclisp_scope *scope, struct veclisp_cell args, s
     if (veclisp_lambda(scope, p, args, &s)) return 1;
     if (!(s.type == VECLISP_PAIR && s.as.pair == NULL)) {
       result->as.vec[0].as.integer = used - 1;
-      result->as.vec = realloc(result->as.vec, sizeof(*result->as.vec) * used);
+      result->as.vec = GC_realloc(result->as.vec, sizeof(*result->as.vec) * used);
       return 0;
     }
     args.type = VECLISP_PAIR;
