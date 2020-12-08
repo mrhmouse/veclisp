@@ -118,6 +118,7 @@ int veclisp_n_writebytes(struct veclisp_scope *, struct veclisp_cell, struct vec
 int veclisp_n_print(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
 int veclisp_n_exit(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
 int veclisp_n_write(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
+int veclisp_n_pack(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
 #define FORNEXT(var, init) for (var = init; var != NULL; var = var->next)
 #define FORPAIR(var, init) for (var = init; var->type == VECLISP_PAIR && var->as.pair != NULL; var = &var->as.pair[1])
 #define FORVEC(i, vec) for (i = 1; i <= vec[0].as.integer; ++i)
@@ -352,6 +353,8 @@ int veclisp_init_root_scope(struct veclisp_scope *root_scope) {
   veclisp_set(root_scope, veclisp_intern("exit"), value);
   value.as.integer = (int64_t)veclisp_n_write;
   veclisp_set(root_scope, veclisp_intern("write"), value);
+  value.as.integer = (int64_t)veclisp_n_pack;
+  veclisp_set(root_scope, veclisp_intern("pack"), value);
   value.type = VECLISP_SYM;
   value.as.sym = VECLISP_DEFAULT_PROMPT;
   veclisp_set(root_scope, VECLISP_PROMPT, value);
@@ -1650,6 +1653,49 @@ int veclisp_n_write(struct veclisp_scope *scope, struct veclisp_cell args, struc
   veclisp_write(scope, *result);
   return 0;
 }
+char *veclisp_pack(struct veclisp_cell value, int64_t *used, int64_t *allocated, char *sym) {
+  int64_t i;
+  switch (value.type) {
+  case VECLISP_SYM:
+    for (i = 0; value.as.sym[i] != 0; ++i) {
+      if (*used >= *allocated) {
+        *allocated *= 2;
+        sym = realloc(sym, sizeof(*sym) * (*allocated));
+      }
+      sym[(*used)++] = value.as.sym[i];
+    }
+    return sym;
+  case VECLISP_INT:
+    if (*used >= *allocated) {
+      *allocated *= 2;
+      sym = realloc(sym, sizeof(*sym) * (*allocated));
+    }
+    sym[(*used)++] = value.as.integer;
+    return sym;
+  case VECLISP_PAIR:
+    sym = veclisp_pack(value.as.pair[0], used, allocated, sym);
+    return veclisp_pack(value.as.pair[1], used, allocated, sym);
+  case VECLISP_VEC:
+    FORVEC(i, value.as.vec) {
+      sym = veclisp_pack(value.as.vec[i], used, allocated, sym);
+    }
+    return sym;
+  }
+  return NULL;
+}
+int veclisp_n_pack(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
+  struct veclisp_cell value, *a;
+  int64_t used = 0, allocated = 32;
+  char *sym = malloc(sizeof(*sym) * allocated);
+  FORPAIR(a, &args) {
+    if (veclisp_eval(scope, args.as.pair[0], &value)) return 1;
+    sym = veclisp_pack(value, &used, &allocated, sym);
+  }
+  sym[used++] = 0;
+  result->type = VECLISP_SYM;
+  result->as.sym = veclisp_intern(sym);
+  return 0;
+}
 /*
   int veclisp_n_fold(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
   }
@@ -1658,8 +1704,6 @@ int veclisp_n_write(struct veclisp_scope *scope, struct veclisp_cell args, struc
   int veclisp_n_find(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
   }
   int veclisp_n_bytes(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
-  }
-  int veclisp_n_pack(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
   }
   int veclisp_n_readbytes(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
   }
