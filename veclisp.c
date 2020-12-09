@@ -1704,7 +1704,7 @@ int veclisp_n_pack(struct veclisp_scope *scope, struct veclisp_cell args, struct
   int64_t used = 0, allocated = 32;
   char *sym = GC_malloc(sizeof(*sym) * allocated);
   FORPAIR(a, &args) {
-    if (veclisp_eval(scope, args.as.pair[0], &value)) return 1;
+    if (veclisp_eval(scope, a->as.pair[0], &value)) return 1;
     sym = veclisp_pack(value, &used, &allocated, sym);
   }
   sym[used++] = 0;
