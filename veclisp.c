@@ -45,7 +45,7 @@ struct veclisp_interned_syms {
 } *veclisp_interned_syms;
 typedef int (*veclisp_native_func)(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
 
-char *VECLISP_AT, *VECLISP_T, *VECLISP_OUTPORT, *VECLISP_INPORT, *VECLISP_ERRPORT, *VECLISP_PROMPT, *VECLISP_DEFAULT_PROMPT, *VECLISP_QUOTE, *VECLISP_UNQUOTE, *VECLISP_RESPONSE, *VECLISP_DEFAULT_RESPONSE, *VECLISP_ERR_ILLEGAL_DOTTED_LIST, *VECLISP_ERR_EXPECTED_CLOSE_PAREN, *VECLISP_ERR_CANNOT_EXEC_VEC, *VECLISP_ERR_INVALID_NAME, *VECLISP_ERR_EXPECTED_PAIR, *VECLISP_ERR_ILLEGAL_LAMBDA_LIST, *VECLISP_ERR_EXPECTED_INT, *VECLISP_ERR_INVALID_SEQUENCE, *VECLISP_ERR_CANNOT_UPVAL_AT_TOPLEVEL;
+char *VECLISP_UPVAL, *VECLISP_AT, *VECLISP_T, *VECLISP_OUTPORT, *VECLISP_INPORT, *VECLISP_ERRPORT, *VECLISP_PROMPT, *VECLISP_DEFAULT_PROMPT, *VECLISP_QUOTE, *VECLISP_UNQUOTE, *VECLISP_RESPONSE, *VECLISP_DEFAULT_RESPONSE, *VECLISP_ERR_ILLEGAL_DOTTED_LIST, *VECLISP_ERR_EXPECTED_CLOSE_PAREN, *VECLISP_ERR_CANNOT_EXEC_VEC, *VECLISP_ERR_INVALID_NAME, *VECLISP_ERR_EXPECTED_PAIR, *VECLISP_ERR_ILLEGAL_LAMBDA_LIST, *VECLISP_ERR_EXPECTED_INT, *VECLISP_ERR_INVALID_SEQUENCE;
 char *veclisp_intern(char *sym);
 void veclisp_print_prompt(struct veclisp_scope *scope);
 void veclisp_write_result(struct veclisp_scope *scope, struct veclisp_cell value);
@@ -54,6 +54,7 @@ int veclisp_init_root_scope(struct veclisp_scope *root_scope);
 int veclisp_scope_lookup(struct veclisp_scope *scope, char *sym, struct veclisp_cell *result);
 int veclisp_read(struct veclisp_scope *scope, struct veclisp_cell *result);
 int veclisp_eval(struct veclisp_scope *scope, struct veclisp_cell value, struct veclisp_cell *result);
+int veclisp_n_begin(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
 int veclisp_lambda(struct veclisp_scope *parent_scope, struct veclisp_cell lambda, struct veclisp_cell args, struct veclisp_cell *result);
 int veclisp_n_call(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result);
 void veclisp_write(struct veclisp_scope *scope, struct veclisp_cell value);
@@ -99,7 +100,6 @@ int veclisp_n_vectorref(struct veclisp_scope *, struct veclisp_cell, struct vecl
 int veclisp_n_vectorset(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
 int veclisp_n_length(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
 int veclisp_n_eval(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
-int veclisp_n_upval(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
 int veclisp_n_sethead(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
 int veclisp_n_settail(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
 int veclisp_n_locals(struct veclisp_scope *, struct veclisp_cell, struct veclisp_cell *);
@@ -214,6 +214,7 @@ void veclisp_print_err(struct veclisp_scope *scope, struct veclisp_cell err) {
 }
 int veclisp_init_root_scope(struct veclisp_scope *root_scope) {
   struct veclisp_cell value;
+  VECLISP_UPVAL = veclisp_intern("upval");
   VECLISP_AT = veclisp_intern("@");
   VECLISP_T = veclisp_intern("t");
   VECLISP_INPORT = veclisp_intern("*In");
@@ -233,7 +234,6 @@ int veclisp_init_root_scope(struct veclisp_scope *root_scope) {
   VECLISP_ERR_ILLEGAL_LAMBDA_LIST = veclisp_intern("illegal lambda list");
   VECLISP_ERR_EXPECTED_INT = veclisp_intern("expected an integer");
   VECLISP_ERR_INVALID_SEQUENCE = veclisp_intern("invalid sequence. expected a vector or pair");
-  VECLISP_ERR_CANNOT_UPVAL_AT_TOPLEVEL = veclisp_intern("cannot upval at toplevel");
   root_scope->bindings = NULL;
   value.type = VECLISP_INT;
   value.as.integer = (int64_t)stdout;
@@ -322,8 +322,8 @@ int veclisp_init_root_scope(struct veclisp_scope *root_scope) {
   veclisp_set(root_scope, veclisp_intern("vector-set"), value);
   value.as.integer = (int64_t)veclisp_n_eval;
   veclisp_set(root_scope, veclisp_intern("eval"), value);
-  value.as.integer = (int64_t)veclisp_n_upval;
-  veclisp_set(root_scope, veclisp_intern("upval"), value);
+  value.as.integer = (int64_t)veclisp_n_begin;
+  veclisp_set(root_scope, veclisp_intern("begin"), value);
   value.as.integer = (int64_t)veclisp_n_sethead;
   veclisp_set(root_scope, veclisp_intern("set-head"), value);
   value.as.integer = (int64_t)veclisp_n_settail;
@@ -1115,28 +1115,34 @@ int veclisp_n_eval(struct veclisp_scope *scope, struct veclisp_cell args, struct
   if (veclisp_eval(scope, args.as.pair[0], result)) return 1;
   return veclisp_eval(scope, *result, result);
 }
-// TODO maybe a way to mark scopes for upval?
-// situation:
-// (set 'foo '((A) (if (something? A)
-//                     (upval A)
-//                     A)))
-//
-// the user intends for A to be evaluated in the scope outside of foo,
-// but instead if it is evaluated in the scope outside of if..
-//
-// there needs to be a way to explicitly delimit the "line" for upval.
-// perhaps something like this?
-// (set 'foo '((A) (begin (if (something? A)
-//                            (upval A)
-//                            A))))
 int veclisp_n_upval(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
-  if (!scope->next) {
-    result->type = VECLISP_SYM;
-    result->as.sym = VECLISP_ERR_CANNOT_UPVAL_AT_TOPLEVEL;
-    return 1;
-  }
+  struct veclisp_scope *s;
   if (veclisp_eval(scope, args.as.pair[0], result)) return 1;
-  return veclisp_eval(scope->next, *result, result);
+  FORNEXT(s, scope) {
+    if (s->bindings[0].value.type == VECLISP_INT && s->bindings[0].value.as.integer == (int64_t)s) {
+      return veclisp_eval(s->next->next, *result, result);
+    }
+  }
+  return 1;
+}
+int veclisp_n_begin(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
+  struct veclisp_cell *a;
+  struct veclisp_scope begin_scope;
+  struct veclisp_bindings begin_bindings[2];
+  begin_scope.bindings = begin_bindings;
+  begin_scope.next = scope;
+  begin_bindings[0].sym = "";
+  begin_bindings[0].value.type = VECLISP_INT;
+  begin_bindings[0].value.as.integer = (int64_t)&begin_scope;
+  begin_bindings[0].next = &begin_bindings[1];
+  begin_bindings[1].sym = VECLISP_UPVAL;
+  begin_bindings[1].value.type = VECLISP_INT;
+  begin_bindings[1].value.as.integer = (int64_t)veclisp_n_upval;
+  begin_bindings[1].next = NULL;
+  FORPAIR(a, &args) {
+    if (veclisp_eval(&begin_scope, a->as.pair[0], result)) return 1;
+  }
+  return 0;
 }
 int veclisp_n_sethead(struct veclisp_scope *scope, struct veclisp_cell args, struct veclisp_cell *result) {
   struct veclisp_cell pair;
